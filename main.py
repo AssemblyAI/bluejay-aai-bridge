@@ -24,6 +24,7 @@ import json
 import os
 import time
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 
@@ -46,7 +47,10 @@ from agent_config import (
 # ---------------------------------------------------------------------------
 
 ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY", os.getenv("API_KEY", ""))
-AAI_WS_URL = os.getenv("AAI_WS_URL", "wss://agents.assemblyai.com/v1/realtime")
+AAI_WS_URL = os.getenv("AAI_WS_URL", "wss://agents.assemblyai.com/v1/ws")
+# Optional: bind sessions to a stored agent (POST /v1/agents) instead of the
+# inline config in agent_config.py.
+AAI_AGENT_ID = os.getenv("AAI_AGENT_ID", "")
 PORT = int(os.getenv("PORT", 8767))
 
 # HTTP Basic auth on the WS upgrade (per CHIRP spec). If unset, the server
@@ -138,9 +142,13 @@ async def bluejay_handler(request: web.Request) -> web.WebSocketResponse:
         async with aiohttp.ClientSession() as http:
             async with http.ws_connect(AAI_WS_URL, headers=headers) as aai_ws:
                 # Send session.update FIRST so the greeting fires fast.
-                voice = pick_voice()
-                print(f"  Voice: {voice}")
-                await aai_ws.send_json(session_config(voice))
+                if AAI_AGENT_ID:
+                    print(f"  Stored agent: {AAI_AGENT_ID}")
+                    await aai_ws.send_json(session_config(None, agent_id=AAI_AGENT_ID))
+                else:
+                    voice = pick_voice()
+                    print(f"  Voice: {voice}")
+                    await aai_ws.send_json(session_config(voice))
 
                 # MCP setup runs as a background task — never blocks audio.
                 mcp_holder: dict = {"client": None}
@@ -178,6 +186,12 @@ async def bluejay_handler(request: web.Request) -> web.WebSocketResponse:
                 agent_idle = asyncio.Event()
                 agent_idle.set()
 
+                # AAI drops input.audio sent before session.ready — buffer
+                # until then. Set once the server acks the session config.
+                session_ready = asyncio.Event()
+                # Set when the server emits session.ended (clean teardown).
+                session_ended = asyncio.Event()
+
                 async def safe_send_text(payload: str):
                     if bluejay_ws.closed:
                         return
@@ -204,6 +218,10 @@ async def bluejay_handler(request: web.Request) -> web.WebSocketResponse:
                     window_sample_count = 0
                     other_types: dict = {}
                     upsample_state = None  # carried across audioop.ratecv calls
+                    # 24k audio that arrived before session.ready, flushed on
+                    # first frame after. Bounded to ~10s (agent_timeout fires
+                    # at 10s if the session never comes up).
+                    pre_ready_buffer: deque = deque(maxlen=1000)
                     try:
                         async for msg in bluejay_ws:
                             if msg.type == WSMsgType.BINARY:
@@ -220,10 +238,18 @@ async def bluejay_handler(request: web.Request) -> web.WebSocketResponse:
                                     window_sample_count += in_samples.size
                                 pcm24k, upsample_state = upsample_16_to_24(msg.data, upsample_state)
                                 if pcm24k:
-                                    await aai_ws.send_json({
-                                        "type": "input.audio",
-                                        "audio": base64.b64encode(pcm24k).decode(),
-                                    })
+                                    if not session_ready.is_set():
+                                        pre_ready_buffer.append(pcm24k)
+                                    else:
+                                        while pre_ready_buffer:
+                                            await aai_ws.send_json({
+                                                "type": "input.audio",
+                                                "audio": base64.b64encode(pre_ready_buffer.popleft()).decode(),
+                                            })
+                                        await aai_ws.send_json({
+                                            "type": "input.audio",
+                                            "audio": base64.b64encode(pcm24k).decode(),
+                                        })
                                 # Log every ~1s of audio with peak/RMS so we
                                 # can tell silence from speech at a glance.
                                 if binary_count - last_logged_at >= 50:
@@ -259,6 +285,14 @@ async def bluejay_handler(request: web.Request) -> web.WebSocketResponse:
                             await asyncio.wait_for(agent_idle.wait(), timeout=60)
                         except asyncio.TimeoutError:
                             pass
+                        # session.end stops billing immediately. Just closing
+                        # the socket keeps the session resumable (and billed)
+                        # for another 30 seconds.
+                        try:
+                            await aai_ws.send_json({"type": "session.end"})
+                            await asyncio.wait_for(session_ended.wait(), timeout=5)
+                        except Exception:
+                            pass
                         await aai_ws.close()
 
                 async def aai_to_bluejay():
@@ -274,6 +308,7 @@ async def bluejay_handler(request: web.Request) -> web.WebSocketResponse:
 
                             if t == "session.ready":
                                 session_id = event.get("session_id")
+                                session_ready.set()
                                 print(f"  Session ready: {session_id}")
 
                             elif t == "transcript.user":
@@ -355,6 +390,7 @@ async def bluejay_handler(request: web.Request) -> web.WebSocketResponse:
                                                 "type": "tool.result",
                                                 "call_id": r["call_id"],
                                                 "result": r["result"],
+                                                "is_error": r.get("is_error", False),
                                             })
 
                             elif t in ("error", "session.error"):
@@ -367,6 +403,17 @@ async def bluejay_handler(request: web.Request) -> web.WebSocketResponse:
 
                             elif t == "input.speech.started":
                                 print("  AAI detected user speech")
+
+                            elif t == "input.speech.stopped":
+                                print("  AAI detected end of user speech")
+
+                            elif t == "session.ended":
+                                print(
+                                    f"  Session ended: "
+                                    f"{event.get('session_duration_seconds')}s wall clock, "
+                                    f"{event.get('audio_duration_seconds')}s audio"
+                                )
+                                session_ended.set()
 
                             elif t == "transcript.user.delta":
                                 # Interim transcripts — useful to know AAI
@@ -437,6 +484,8 @@ async def main():
 
     print(f"Bluejay <-> AAI bridge — port {PORT}")
     print(f"Upstream: {AAI_WS_URL}")
+    if AAI_AGENT_ID:
+        print(f"Stored agent: {AAI_AGENT_ID}")
     print(f"CHIRP auth required: {bool(CHIRP_USER and CHIRP_PASS)}")
 
     app = web.Application(middlewares=[cors_middleware])
