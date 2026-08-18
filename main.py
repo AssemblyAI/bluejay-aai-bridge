@@ -11,14 +11,14 @@ Protocol notes:
     events: speech.started, speech.completed, session.error.
   - AssemblyAI Voice Agent API speaks 24 kHz mono pcm_s16le wrapped in JSON
     (input.audio inbound, reply.audio outbound).
-  - We resample 16k <-> 24k with scipy.signal.resample_poly (3:2 up, 2:3 down)
-    and translate event shapes.
+  - We resample 16k <-> 24k with stdlib audioop.ratecv (stateful across
+    chunks) and translate event shapes.
   - HTTP Basic auth on the upgrade per CHIRP. Set CHIRP_USER and CHIRP_PASS
     env vars to enable; leave unset to skip auth (dev only).
 """
 
 import asyncio
-import audioop  # stdlib; deprecated in 3.13, removed in 3.14
+import audioop  # stdlib; removed in Python 3.13 — this project pins 3.12
 import base64
 import json
 import os

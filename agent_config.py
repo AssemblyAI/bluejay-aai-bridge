@@ -1,8 +1,7 @@
 """
-Agent configuration — system prompt, voice catalog, tool definitions, and
-session_config builder. Copied from the main web-agent-proxy repo so this
-service can be deployed independently. When the upstream prompt changes,
-this file should be re-synced.
+Agent configuration — system prompt template, voice catalog, tool
+definitions, tuning knobs, and the session_config builder. Everything you
+edit to configure your agent lives in this file.
 """
 
 import json

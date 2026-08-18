@@ -98,7 +98,7 @@ Then point Bluejay at `ws://localhost:8767/voice` (or `/`) with no auth.
 With auth:
 
 ```sh
-ASSEMBLYAI_API_KEY=sk_xxx CHIRP_USER=tomas CHIRP_PASS=tomas python main.py
+ASSEMBLYAI_API_KEY=sk_xxx CHIRP_USER=myuser CHIRP_PASS=mypass python main.py
 ```
 
 ## Deploy on Railway
@@ -117,8 +117,8 @@ ASSEMBLYAI_API_KEY=sk_xxx CHIRP_USER=tomas CHIRP_PASS=tomas python main.py
   `scipy.signal.resample_poly` introduce a transient on every chunk
   boundary at that size, which AAI's STT can't decode. `audioop.ratecv`
   is stateful — filter state is carried across calls so chunk boundaries
-  don't produce artifacts. `audioop` was deprecated in Python 3.13 and
-  removed in 3.14; this project pins Python 3.12.
+  don't produce artifacts. `audioop` was removed from the stdlib in
+  Python 3.13; this project pins Python 3.12 (see `runtime.txt`).
 - **Bluejay user `speech.started` is currently logged-only**. AAI's VAD
   barges in fine from the audio alone, and forwarding could cause
   double interrupts. Easy to wire through if simulations show issues.
