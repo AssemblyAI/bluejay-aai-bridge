@@ -23,7 +23,7 @@ You bring your own system prompt — the bridge is a transport-only adapter.
   leaves the session (and billing) alive for a 30-second resume window,
   which adds up fast across simulation runs.
 - Optional live tool calls into the AssemblyAI docs MCP server
-  (`search_docs`, `get_pages`, `list_sections`, `get_api_reference`).
+  (`search_docs`, `read_docs_page`).
 
 ## Configure your agent
 
@@ -53,8 +53,9 @@ and edit:
   French) or trim to a subset. `GET https://agents.assemblyai.com/v1/voices`
   is the authoritative live list.
 - **`TOOLS`** — function tools registered on the AAI session. Default
-  is the AssemblyAI docs MCP (`search_docs`, `get_pages`, etc.). Set
-  to `[]` if you don't want tool calling.
+  is the AssemblyAI docs MCP at `https://www.assemblyai.com/docs/mcp`
+  (`search_docs`, `read_docs_page`). Set to `[]` if you don't want
+  tool calling.
 - **Speech-to-text / turn-taking tuning** (all optional, server
   defaults when unset):
   - `TRANSCRIPTION_MODE` — `balanced` (default) / `min_latency` /

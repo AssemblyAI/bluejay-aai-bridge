@@ -33,7 +33,7 @@ import numpy as np
 from aiohttp import web, WSMsgType
 
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from agent_config import (
     MCP_URL,
@@ -157,7 +157,7 @@ async def bluejay_handler(request: web.Request) -> web.WebSocketResponse:
 
                 async def mcp_keeper():
                     try:
-                        async with streamablehttp_client(MCP_URL) as (mr, mw, _), \
+                        async with streamable_http_client(MCP_URL) as (mr, mw), \
                                    ClientSession(mr, mw) as client:
                             await client.initialize()
                             mcp_holder["client"] = client
@@ -408,10 +408,11 @@ async def bluejay_handler(request: web.Request) -> web.WebSocketResponse:
                                 print("  AAI detected end of user speech")
 
                             elif t == "session.ended":
+                                audio_s = event.get("audio_duration_seconds")
                                 print(
                                     f"  Session ended: "
                                     f"{event.get('session_duration_seconds')}s wall clock, "
-                                    f"{event.get('audio_duration_seconds')}s audio"
+                                    f"audio in: {f'{audio_s}s' if audio_s is not None else 'n/a'}"
                                 )
                                 session_ended.set()
 

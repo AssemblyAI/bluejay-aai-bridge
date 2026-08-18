@@ -7,12 +7,13 @@ this file should be re-synced.
 
 import json
 import random
+import shlex
 from datetime import datetime, timezone
 
 from mcp import ClientSession
 
 
-MCP_URL = "https://mcp.assemblyai.com/docs"
+MCP_URL = "https://www.assemblyai.com/docs/mcp"
 
 
 TOOLS = [
@@ -35,49 +36,37 @@ TOOLS = [
     },
     {
         "type": "function",
-        "name": "get_pages",
+        "name": "read_docs_page",
         "description": (
-            "Retrieve full content of specific AssemblyAI documentation pages "
-            "by path. Use after search_docs when a snippet isn't enough."
+            "Read the full content of one AssemblyAI documentation page. Use "
+            "after search_docs when a snippet isn't enough."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "paths": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Page paths returned by search_docs.",
-                },
-            },
-            "required": ["paths"],
-        },
-    },
-    {
-        "type": "function",
-        "name": "list_sections",
-        "description": (
-            "Browse the structure of AssemblyAI documentation. Use when you're "
-            "not sure what to search for."
-        ),
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "type": "function",
-        "name": "get_api_reference",
-        "description": (
-            "Get API endpoint details and schemas for AssemblyAI APIs."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "endpoint": {
+                "path": {
                     "type": "string",
-                    "description": "Endpoint path or topic.",
+                    "description": "A page path returned by search_docs.",
                 },
             },
+            "required": ["path"],
         },
     },
 ]
+
+
+def _map_tool_call(name: str, args: dict) -> tuple[str, dict]:
+    """Map an agent-facing tool call onto the docs MCP server's tools."""
+    if name == "search_docs":
+        return "search_assembly_ai", {"query": str(args.get("query", ""))}
+    if name == "read_docs_page":
+        path = str(args.get("path", "")).strip()
+        if not path.startswith("/"):
+            path = "/" + path
+        if not path.endswith(".mdx"):
+            path += ".mdx"
+        return "query_docs_filesystem_assembly_ai", {"command": f"head -250 {shlex.quote(path)}"}
+    return name, args
 
 
 async def execute_mcp_tool(mcp: ClientSession, event: dict) -> dict:
@@ -90,10 +79,15 @@ async def execute_mcp_tool(mcp: ClientSession, event: dict) -> dict:
         except json.JSONDecodeError:
             args = {}
     is_error = False
+    mcp_name, mcp_args = _map_tool_call(name, args)
     try:
-        mcp_result = await mcp.call_tool(name, args)
+        mcp_result = await mcp.call_tool(mcp_name, mcp_args)
         text = "\n".join(c.text for c in mcp_result.content if getattr(c, "text", None))
         result = text or "No content returned."
+        # Cap what goes back into the voice agent's LLM — full-page dumps
+        # add reply latency without helping a spoken answer.
+        if len(result) > 8000:
+            result = result[:8000] + "\n[truncated]"
     except Exception as e:
         result = f"Error calling {name}: {e}"
         is_error = True
