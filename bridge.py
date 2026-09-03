@@ -73,12 +73,12 @@ BLUEJAY_API_URL = os.getenv("BLUEJAY_API_URL", "https://api.getbluejay.ai")
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-# Whether what was said appears in the logs. On by default: watching the
-# conversation is how you follow a simulation, and the caller is a synthetic
-# Digital Human rather than a real person. Turn it off on a shared or hosted
-# bridge, where the lines land in someone else's log aggregator, or when the
-# Digital Humans are seeded with realistic personal data.
-LOG_TRANSCRIPTS = os.getenv("LOG_TRANSCRIPTS", "1").strip().lower() not in ("0", "false", "no", "off")
+# Whether what was said appears in the logs. Off unless asked for, because the
+# code cannot tell a local terminal from a hosted bridge shipping its logs to a
+# third party, and the second is where the transcripts of a whole simulation
+# suite would pile up. .env.example turns it on, so a local run still prints the
+# conversation; a deployment sets its variables explicitly and has to opt in.
+LOG_TRANSCRIPTS = os.getenv("LOG_TRANSCRIPTS", "").strip().lower() in ("1", "true", "yes", "on")
 
 # Audio: Bluejay is 16 kHz, the Voice Agent API is 24 kHz; both mono pcm_s16le.
 BLUEJAY_RATE = 16_000

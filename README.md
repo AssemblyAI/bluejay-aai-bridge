@@ -134,7 +134,7 @@ Because the session message carries only an agent id, nothing about the agent's 
 | `CHIRP_USER`, `CHIRP_PASS` | before hosting | The Basic-auth pair Bluejay sends. Unset means anyone who can reach the port can start a call on your key. |
 | `BLUEJAY_API_KEY` | optional | Writes each call's AssemblyAI session id back onto the Bluejay simulation result. |
 | `LOG_LEVEL` | `INFO` | `DEBUG` logs every event and the level of the incoming audio. |
-| `LOG_TRANSCRIPTS` | `1` | Whether what was said appears in the logs. Set to `0` on a hosted bridge, or when Digital Humans carry realistic personal data; turn counts are still logged. |
+| `LOG_TRANSCRIPTS` | off | Print what was said. `.env.example` sets it to `1` so local runs show the conversation. Leave it out when hosting, since those logs go to a third party; turn counts are logged either way. |
 | `PORT` | `8767` | Set for you by Railway and Render. |
 
 A `.env` next to `bridge.py` is loaded on startup, and real environment variables win over it. [.env.example](.env.example) lists them all.
