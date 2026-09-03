@@ -28,6 +28,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 import uuid
 import warnings
@@ -71,6 +72,13 @@ BLUEJAY_API_KEY = os.getenv("BLUEJAY_API_KEY", "")
 BLUEJAY_API_URL = os.getenv("BLUEJAY_API_URL", "https://api.getbluejay.ai")
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+# Whether what was said appears in the logs. On by default: watching the
+# conversation is how you follow a simulation, and the caller is a synthetic
+# Digital Human rather than a real person. Turn it off on a shared or hosted
+# bridge, where the lines land in someone else's log aggregator, or when the
+# Digital Humans are seeded with realistic personal data.
+LOG_TRANSCRIPTS = os.getenv("LOG_TRANSCRIPTS", "1").strip().lower() not in ("0", "false", "no", "off")
 
 # Audio: Bluejay is 16 kHz, the Voice Agent API is 24 kHz; both mono pcm_s16le.
 BLUEJAY_RATE = 16_000
@@ -184,6 +192,17 @@ class Framer:
 # ---------------------------------------------------------------------------
 # CHIRP helpers
 # ---------------------------------------------------------------------------
+
+
+# Anything a caller said, or a model wrote, is untrusted text on its way to a
+# log line. Control characters are stripped so it cannot forge one, and the
+# length is bounded so a long turn cannot flood the file.
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def spoken(text: str, limit: int = 500) -> str:
+    text = re.sub(r"\s+", " ", _CONTROL.sub(" ", text)).strip()
+    return text if len(text) <= limit else text[:limit] + "..."
 
 
 def make_chirp(event_type: str, data: dict) -> str:
@@ -425,19 +444,20 @@ class Bridge:
         elif t == "input.speech.stopped":
             self.slog.debug("Agent hears the Digital Human stop")
         elif t == "transcript.user.delta":
-            self.slog.debug("User (partial): %s", event.get("text", ""))
+            if LOG_TRANSCRIPTS:
+                self.slog.debug("User (partial): %s", spoken(event.get("text", "")))
 
         elif t == "transcript.user":
             self.user_turns += 1
-            self.slog.info("User: %s", event.get("text", ""))
+            self.log_turn("User", event.get("text", ""))
 
         elif t == "transcript.agent.delta":
             pass  # word-level captions; not needed for a bridge
 
         elif t == "transcript.agent":
             self.agent_turns += 1
-            self.slog.info("Agent: %s%s", event.get("text", ""),
-                           " (interrupted)" if event.get("interrupted") else "")
+            self.log_turn("Agent", event.get("text", ""),
+                          " (interrupted)" if event.get("interrupted") else "")
 
         elif t == "reply.started":
             self.slog.debug("reply.started %s", event.get("reply_id"))
@@ -463,6 +483,13 @@ class Bridge:
 
         else:
             self.slog.debug("Unhandled event %s", t)
+
+    def log_turn(self, who: str, text: str, suffix: str = "") -> None:
+        """What was said, or only that something was, per LOG_TRANSCRIPTS."""
+        if LOG_TRANSCRIPTS:
+            self.slog.info("%s: %s%s", who, spoken(text), suffix)
+        else:
+            self.slog.info("%s: %d characters%s", who, len(text), suffix)
 
     async def on_reply_audio(self, audio_b64: str) -> None:
         if not audio_b64:
@@ -549,11 +576,11 @@ class Bridge:
         })
 
         if name in self.server_tools:
-            self.slog.info("Tool call: %s(%s)", name, json.dumps(args)[:200])
+            self.slog.info("Tool call: %s(%s)", name, self.log_args(args))
             return
 
         self.slog.warning("Tool %s has no http block, so nothing here can answer it. "
-                          "See agents/README.md", name)
+                          "See agents/README.md", name)  # name only, arguments may carry PII
         if self.aai_ws is not None and not self.aai_ws.closed:
             await self.aai_ws.send_json({
                 "type": "tool.result",
@@ -564,6 +591,14 @@ class Bridge:
                 }),
                 "is_error": True,
             })
+
+    @staticmethod
+    def log_args(args: dict) -> str:
+        """Tool arguments are lifted from what the caller said, so they are
+        conversation content too. Without transcripts, log the names only."""
+        if LOG_TRANSCRIPTS:
+            return spoken(json.dumps(args), 200)
+        return ", ".join(f"{key}=..." for key in args)
 
     # -- errors and teardown ------------------------------------------------------
 

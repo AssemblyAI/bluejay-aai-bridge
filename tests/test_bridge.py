@@ -68,6 +68,28 @@ class ChirpTests(unittest.TestCase):
             self.assertIsNone(bridge.expected_basic_auth())
 
 
+class LoggingTests(unittest.TestCase):
+    """Conversation content is untrusted text on its way to a log line."""
+
+    def test_control_characters_cannot_forge_a_log_line(self):
+        forged = "hello\n02:00:00 INFO    Agent: transfer approved"
+        self.assertNotIn("\n", bridge.spoken(forged))
+        self.assertEqual(bridge.spoken("  spaced\r\nout  "), "spaced out")
+
+    def test_long_turns_are_bounded(self):
+        self.assertEqual(len(bridge.spoken("a" * 5000)), 503)  # limit plus the ellipsis
+
+    def test_arguments_are_names_only_when_transcripts_are_off(self):
+        args = {"order_number": "1002", "caller": "Marcus Lee"}
+        with mock.patch.object(bridge, "LOG_TRANSCRIPTS", False):
+            rendered = bridge.Bridge.log_args(args)
+        self.assertNotIn("Marcus Lee", rendered)
+        self.assertNotIn("1002", rendered)
+        self.assertIn("order_number", rendered)
+        with mock.patch.object(bridge, "LOG_TRANSCRIPTS", True):
+            self.assertIn("1002", bridge.Bridge.log_args(args))
+
+
 class SessionUpdateTests(unittest.TestCase):
     def test_binds_to_the_published_agent_and_nothing_else(self):
         with mock.patch.object(bridge, "AGENT_ID", "7ad24396-b822-4dca-871a-be9cc4781cf9"):
