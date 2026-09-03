@@ -1,3 +1,5 @@
+# The bridge sits in the audio path, so it needs a WebSocket server and client.
+# publish.py, import_agent.py and sessions.py are standard library only.
 aiohttp==3.14.3
-numpy==1.26.2
-mcp==2.0.0
+# audioop left the standard library in Python 3.13; this is the maintained backport.
+audioop-lts==0.2.2; python_version >= "3.13"

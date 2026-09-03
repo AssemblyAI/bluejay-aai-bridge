@@ -1,5 +1,6 @@
 .env
-.env.local
+agents/*.env
+out/
 __pycache__/
 *.pyc
 *.pyo

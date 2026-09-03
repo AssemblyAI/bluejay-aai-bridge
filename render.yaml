@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: bluejay-aai-bridge
+    runtime: python
+    # Not the free plan: it sleeps when idle, and simulations arrive in bursts
+    # after a quiet period, so the first calls of a run would time out.
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -u bridge.py
+    healthCheckPath: /health
+    envVars:
+      # sync: false is what makes Render prompt for a value during Blueprint
+      # creation. Everything below with a literal value is set for you and can
+      # be changed afterwards under Environment on the service.
+      - key: ASSEMBLYAI_API_KEY
+        sync: false
+      # The agent to test, from its URL in the AssemblyAI dashboard.
+      - key: AGENT_ID
+        sync: false
+      # The Basic-auth pair Bluejay will send. Copy both into Bluejay's agent
+      # connection settings once the service is up.
+      - key: CHIRP_USER
+        value: bluejay
+      - key: CHIRP_PASS
+        generateValue: true
