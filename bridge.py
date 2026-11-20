@@ -529,7 +529,9 @@ class Bridge:
     async def playout(self) -> None:
         """Send agent audio to Bluejay at real-time pace (see PLAYOUT_LEAD_S)."""
         loop = asyncio.get_running_loop()
-        next_at: Optional[float] = None
+        # Where the audio already sent to Bluejay finishes playing. Kept across
+        # utterances: a reply queued behind another is still behind it at Bluejay.
+        next_at = 0.0
         while True:
             gen, kind, payload = await self.play_q.get()
             if gen != self.play_gen:
@@ -539,11 +541,11 @@ class Bridge:
                 # Ask Bluejay to tell us when this utterance has actually played out.
                 await self.send_chirp("mark", {"name": payload})
                 self.marks_sent[payload] = time.monotonic()
-                next_at = None
                 continue
             now = loop.time()
-            if next_at is None or now > next_at + 0.5:
-                next_at = now  # start of an utterance, or we fell behind: resync
+            # Once Bluejay has played everything it has, start from now rather
+            # than bursting to catch up: a burst would exceed PLAYOUT_LEAD_S.
+            next_at = max(next_at, now)
             if next_at - now > PLAYOUT_LEAD_S:
                 await asyncio.sleep(next_at - now - PLAYOUT_LEAD_S)
                 if gen != self.play_gen:
